@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>看见声音 · 光斑图案正向仿真</title>
+    <style>
+        :root {
+            --bg: #121212;
+            --panel: #1e1e1e;
+            --text: #e0e0e0;
+            --accent: #4caf50;
+            --laser: #ff5252;
+        }
+        body {
+            margin: 0; padding: 0;
+            background-color: var(--bg);
+            color: var(--text);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            display: flex; height: 100vh; overflow: hidden;
+        }
+        #controls {
+            width: 340px; background-color: var(--panel);
+            padding: 20px; box-sizing: border-box;
+            display: flex; flex-direction: column; gap: 12px;
+            overflow-y: auto;
+            box-shadow: 2px 0 10px rgba(0,0,0,0.5);
+            z-index: 10;
+        }
+        h2 { margin-top: 0; margin-bottom: 10px; font-size: 1.2rem; color: var(--accent); text-align: center; }
+        .control-group { display: flex; flex-direction: column; gap: 4px; }
+        .control-group label { font-size: 0.85rem; display: flex; justify-content: space-between; }
+        .control-group input[type="range"] { width: 100%; cursor: pointer; }
+        .value-display { color: var(--accent); font-weight: bold; }
+        .note { font-size: 0.75rem; color: #888; margin-top: -2px; line-height: 1.3; }
+        
+        #canvas-container {
+            flex: 1; display: flex; flex-direction: column;
+            justify-content: center; align-items: center;
+            position: relative; background-color: #000;
+        }
+        canvas {
+            box-shadow: 0 0 20px rgba(0,0,0,0.8);
+            border: 1px solid #333;
+        }
+        #overlay {
+            position: absolute; top: 20px; right: 20px;
+            text-align: right; pointer-events: none;
+            text-shadow: 1px 1px 2px #000;
+        }
+        .btn {
+            background: var(--accent); color: #000; border: none;
+            padding: 8px 12px; border-radius: 4px; cursor: pointer;
+            font-weight: bold; margin-top: 10px;
+        }
+        .btn:hover { opacity: 0.8; }
+    </style>
+</head>
+<body>
+
+<div id="controls">
+    <h2>控制面板</h2>
+    
+    <div class="control-group">
+        <label>膜半径 R (mm)</label>
+        <input type="range" id="R" min="50" max="100" value="75" step="1">
+        <span class="value-display" id="R-val">75 mm</span>
+    </div>
+
+    <div class="control-group">
+        <label>张力 T (N/m)</label>
+        <input type="range" id="T" min="100" max="500" value="250" step="10">
+        <span class="value-display" id="T-val">250 N/m</span>
+    </div>
+
+    <div class="control-group">
+        <label>屏距 L (m)</label>
+        <input type="range" id="L" min="1" max="5" value="3" step="0.1">
+        <span class="value-display" id="L-val">3.0 m</span>
+    </div>
+
+    <div class="control-group" style="border-top: 1px solid #333; padding-top: 12px;">
+        <label>驱动频率 f₁ (Hz)</label>
+        <input type="range" id="f1" min="50" max="600" value="234.7" step="0.1">
+        <span class="value-display" id="f1-val">234.7 Hz</span>
+        <div class="note">提示：150Hz附近是m=0；235Hz附近是m=1（存在简并）。</div>
+    </div>
+
+    <div class="control-group">
+        <label>驱动频率 f₂ (Hz) <span style="color:#888;font-size:0.7rem">(设为0则单频)</span></label>
+        <input type="range" id="f2" min="0" max="600" value="0" step="0.1">
+        <span class="value-display" id="f2-val">关闭 (单频)</span>
+    </div>
+
+    <div class="control-group" style="border-top: 1px solid #333; padding-top: 12px;">
+        <label>阻尼比 ζ</label>
+        <input type="range" id="zeta" min="0.001" max="0.1" value="0.02" step="0.001">
+        <span class="value-display" id="zeta-val">0.020</span>
+    </div>
+
+    <div class="control-group">
+        <label>简并分裂 (Hz) <span style="color:#888;font-size:0.7rem">(模拟张力各向异性)</span></label>
+        <input type="range" id="split" min="0" max="5" value="1.0" step="0.1">
+        <span class="value-display" id="split-val">1.0 Hz</span>
+        <div class="note">在 m=1 模态下，简并分裂 > 0 会使得单频轨迹变成椭圆。</div>
+    </div>
+
+    <div class="control-group" style="border-top: 1px solid #333; padding-top: 12px;">
+        <label>镜心位置 r₀/R</label>
+        <input type="range" id="r0" min="0.1" max="0.9" value="0.6" step="0.05">
+        <span class="value-display" id="r0-val">0.60</span>
+    </div>
+
+    <div class="control-group">
+        <label>声源半径 r/R</label>
+        <input type="range" id="rs" min="0.1" max="0.9" value="0.5" step="0.05">
+        <span class="value-display" id="rs-val">0.50</span>
+    </div>
+
+    <div class="control-group">
+        <label>声源方位角 (°)</label>
+        <input type="range" id="phis" min="0" max="90" value="30" step="1">
+        <span class="value-display" id="phis-val">30°</span>
+        <div class="note">角度为0时，声源在节线上，无法激发sin简并模态。</div>
+    </div>
+
+    <button class="btn" id="reset-btn">重置视角</button>
+</div>
+
+<div id="canvas-container">
+    <canvas id="sim-canvas" width="800" height="800"></canvas>
+    <div id="overlay">
+        <h3 style="color:var(--laser)">长曝光轨迹 + 实时位置</h3>
+        <p>单位：毫米 (mm)</p>
+        <p id="status-text">正在计算...</p>
+    </div>
+</div>
+
+<script>
+// ================= 数学基础 =================
+const ZEROS = [
+    [2.404826, 5.520078, 8.653728], // m=0
+    [3.831706, 7.015587, 10.173468], // m=1
+    [5.135622, 8.417244, 11.619841], // m=2
+    [6.380162, 9.761023, 13.015201], // m=3
+    [7.588342, 11.064709, 14.372537] // m=4
+];
+
+function factorial(n) {
+    let res = 1;
+    for (let i = 2; i <= n; i++) res *= i;
+    return res;
+}
+
+function J(m, x) {
+    m = Math.abs(m);
+    if (x === 0) return m === 0 ? 1 : 0;
+    let sum = Math.pow(x / 2, m) / factorial(m);
+    let term = sum;
+    for (let k = 0; k < 60; k++) {
+        term *= -(x * x / 4) / ((k + 1) * (k + 1 + m));
+        sum += term;
+        if (Math.abs(term) < 1e-15 * Math.abs(sum)) break;
+    }
+    return sum;
+}
+
+function Jp(m, x) {
+    return 0.5 * (J(m - 1, x) - J(m + 1, x));
+}
+
+// ================= 物理模型 =================
+const SIGMA = 0.30; 
+
+function buildModes(R_m, T, split) {
+    let modes = [];
+    const M = 3, N = 2; 
+    for (let m = 0; m <= M; m++) {
+        for (let n = 1; n <= N; n++) {
+            let alpha = ZEROS[m][n - 1];
+            let f = (alpha / (2 * Math.PI * R_m)) * Math.sqrt(T / SIGMA);
+            let Nmn = (Math.PI * R_m * R_m / 2) * Math.pow(J(m + 1, alpha), 2) * (m === 0 ? 2 : 1);
+            
+            modes.push({ m, n, alpha, f, Nmn, kind: 'c' });
+            if (m > 0) {
+                modes.push({ m, n, alpha, f: f + split, Nmn, kind: 's' });
+            }
+        }
+    }
+    return modes;
+}
+
+function getCoupling(md, R_m, rs, phis) {
+    let x = md.alpha * rs / R_m;
+    return J(md.m, x) * (md.kind === 'c' ? Math.cos(md.m * phis) : Math.sin(md.m * phis));
+}
+
+function getResponses(omega, modes, zeta, R_m, rs, phis) {
+    return modes.map(md => {
+        let w_mn = 2 * Math.PI * md.f;
+        let F = getCoupling(md, R_m, rs, phis);
+        
+        let dw = w_mn * w_mn - omega * omega;
+        let dmp = 2 * zeta * w_mn * omega;
+        let denom = Math.sqrt(dw * dw + dmp * dmp);
+        
+        let A = (F / (SIGMA * md.Nmn)) / (denom || 1e-10);
+        let psi = Math.atan2(dmp, dw);
+        return { md, A, psi };
+    });
+}
+
+function getSpot(t, omegaList, respList, L_m, r0, phi0, R_m) {
+    let gx = 0, gy = 0;
+    let c = Math.cos(phi0), s = Math.sin(phi0);
+    
+    for (let i = 0; i < omegaList.length; i++) {
+        let omega = omegaList[i], resp = respList[i];
+        for (let j = 0; j < resp.length; j++) {
+            let { md, A, psi } = resp[j];
+            let m = md.m, x = md.alpha * r0 / R_m;
+            let Jm = J(m, x), Jmp = Jp(m, x);
+            
+            let ddr, dph;
+            if (md.kind === 'c') {
+                ddr = A * (md.alpha / R_m) * Jmp * Math.cos(m * phi0);
+                dph = -A * (m / r0) * Jm * Math.sin(m * phi0);
+            } else {
+                ddr = A * (md.alpha / R_m) * Jmp * Math.sin(m * phi0);
+                dph = A * (m / r0) * Jm * Math.cos(m * phi0);
+            }
+            
+            let dwdx = ddr * c - dph * s;
+            let dwdy = ddr * s + dph * c;
+            let timeFactor = Math.cos(omega * t - psi);
+            
+            gx += dwdx * timeFactor;
+            gy += dwdy * timeFactor;
+        }
+    }
+    return { x: -2 * L_m * gx, y: -2 * L_m * gy };
+}
+
+// ================= 渲染与交互 =================
+const canvas = document.getElementById('sim-canvas');
+const ctx = canvas.getContext('2d');
+const container = document.getElementById('canvas-container');
+
+function resizeCanvas() {
+    let size = Math.min(container.clientWidth, container.clientHeight) - 40;
+    canvas.width = size;
+    canvas.height = size;
+}
+window.addEventListener('resize', resizeCanvas);
+
+const inputs = {
+    R: document.getElementById('R'),
+    T: document.getElementById('T'),
+    L: document.getElementById('L'),
+    f1: document.getElementById('f1'),
+    f2: document.getElementById('f2'),
+    zeta: document.getElementById('zeta'),
+    split: document.getElementById('split'),
+    r0: document.getElementById('r0'),
+    rs: document.getElementById('rs'),
+    phis: document.getElementById('phis')
+};
+
+let params = {};
+let animationId = null;
+let startTime = performance.now();
+let trailPoints = []; 
+const MAX_TRAIL = 5000; 
+let isCalculating = false;
+
+function readParams() {
+    params = {
+        R_m: +inputs.R.value / 1000,
+        T: +inputs.T.value,
+        L_m: +inputs.L.value,
+        f1: +inputs.f1.value,
+        f2: +inputs.f2.value,
+        zeta: +inputs.zeta.value,
+        split: +inputs.split.value,
+        r0: (+inputs.r0.value) * (+inputs.R.value / 1000),
+        rs: (+inputs.rs.value) * (+inputs.R.value / 1000),
+        phis: (+inputs.phis.value) * Math.PI / 180,
+        phi0: 0  
+    };
+    
+    document.getElementById('R-val').textContent = inputs.R.value + ' mm';
+    document.getElementById('T-val').textContent = inputs.T.value + ' N/m';
+    document.getElementById('L-val').textContent = (+inputs.L.value).toFixed(1) + ' m';
+    document.getElementById('f1-val').textContent = (+inputs.f1.value).toFixed(1) + ' Hz';
+    document.getElementById('f2-val').textContent = (+inputs.f2.value === 0) ? '关闭 (单频)' : (+inputs.f2.value).toFixed(1) + ' Hz';
+    document.getElementById('zeta-val').textContent = (+inputs.zeta.value).toFixed(3);
+    document.getElementById('split-val').textContent = (+inputs.split.value).toFixed(1) + ' Hz';
+    document.getElementById('r0-val').textContent = (+inputs.r0.value).toFixed(2);
+    document.getElementById('rs-val').textContent = (+inputs.rs.value).toFixed(2);
+    document.getElementById('phis-val').textContent = inputs.phis.value + '°';
+}
+
+function resetTrail() {
+    trailPoints = [];
+    startTime = performance.now();
+}
+
+Object.values(inputs).forEach(input => {
+    input.addEventListener('input', () => {
+        readParams();
+        resetTrail();
+    });
+});
+
+let autoScale = 1.0;
+let maxObserved = 0;
+
+function animate(time) {
+    if (isCalculating) return;
+    isCalculating = true;
+    
+    let t = (time - startTime) / 1000;
+    
+    let modes = buildModes(params.R_m, params.T, params.split);
+    let omegaList = [];
+    let respList = [];
+    
+    if (params.f1 > 0) {
+        let w1 = 2 * Math.PI * params.f1;
+        omegaList.push(w1);
+        respList.push(getResponses(w1, modes, params.zeta, params.R_m, params.rs, params.phis));
+    }
+    if (params.f2 > 0) {
+        let w2 = 2 * Math.PI * params.f2;
+        omegaList.push(w2);
+        respList.push(getResponses(w2, modes, params.zeta, params.R_m, params.rs, params.phis));
+    }
+    
+    let p = getSpot(t, omegaList, respList, params.L_m, params.r0, params.phi0, params.R_m);
+    let px_mm = p.x * 1000;
+    let py_mm = p.y * 1000;
+    
+    trailPoints.push({ x: px_mm, y: py_mm });
+    if (trailPoints.length > MAX_TRAIL) trailPoints.shift();
+    
+    let maxDist = Math.max(Math.abs(px_mm), Math.abs(py_mm));
+    if (maxDist > maxObserved) maxObserved = maxDist;
+    let targetScale = (canvas.width / 2) * 0.85 / (maxObserved || 1);
+    autoScale += (targetScale - autoScale) * 0.05; 
+    
+    if (maxObserved < 0.01) autoScale = canvas.width / 2 / 0.01;
+    
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    
+    const cx = canvas.width / 2;
+    const cy = canvas.height / 2;
+    
+    // 坐标轴
+    ctx.strokeStyle = '#333';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(cx, 0); ctx.lineTo(cx, canvas.height);
+    ctx.moveTo(0, cy); ctx.lineTo(canvas.width, cy);
+    ctx.stroke();
+    
+    // 轨迹
+    if (trailPoints.length > 1) {
+        ctx.beginPath();
+        ctx.strokeStyle = 'rgba(76, 175, 80, 0.6)'; 
+        ctx.lineWidth = 1.5;
+        ctx.moveTo(cx + trailPoints[0].x * autoScale, cy - trailPoints[0].y * autoScale);
+        for (let i = 1; i < trailPoints.length; i++) {
+            ctx.lineTo(cx + trailPoints[i].x * autoScale, cy - trailPoints[i].y * autoScale);
+        }
+        ctx.stroke();
+    }
+    
+    // 光斑
+    let screenX = cx + px_mm * autoScale;
+    let screenY = cy - py_mm * autoScale;
+    
+    ctx.beginPath();
+    ctx.arc(screenX, screenY, 8, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255, 82, 82, 0.2)';
+    ctx.fill();
+    
+    ctx.beginPath();
+    ctx.arc(screenX, screenY, 3, 0, Math.PI * 2);
+    ctx.fillStyle = '#ff5252';
+    ctx.fill();
+    
+    document.getElementById('status-text').innerHTML = 
+        `光斑坐标: (${px_mm.toFixed(2)}, ${py_mm.toFixed(2)}) mm<br>` +
+        `视野比例: 1 mm = ${autoScale.toFixed(1)} px`;
+
+    isCalculating = false;
+    animationId = requestAnimationFrame(animate);
+}
+
+readParams();
+resizeCanvas();
+resetTrail();
+animationId = requestAnimationFrame(animate);
+
+document.getElementById('reset-btn').addEventListener('click', () => {
+    maxObserved = 0;
+    resetTrail();
+});
+</script>
+</body>
+</html>
